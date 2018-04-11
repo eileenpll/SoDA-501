@@ -1,0 +1,163 @@
+---
+title: |
+  | SoDA 501 - Final Project
+  | An Investigation of GOP Press Releases 
+author: "Steve, Fangcao, Lulu, & Omer"
+output: html_notebook
+---
+
+### 1. Read in Data
+
+```{r}
+# read in json file
+# install.packages("jsonlite")
+library(jsonlite)
+library(tidyverse)
+
+json1 <- "NoContentForLulu0.json"
+json2 <- "NoContentForLulu1.json"
+data1 <- jsonlite::fromJSON(json1, flatten = TRUE)
+data2 <- jsonlite::fromJSON(json2, flatten = TRUE)
+data <- rbind(data1, data2)
+
+p_lst <- data$PERSON
+people <- unlist(p_lst)
+# freq <- sort(table(people), decreasing = T) # count the frequency of occurrences of each person
+# head(freq, n = 50L) # take a look at people ranked top 50 
+p_nodes <- sort(unique(people)) %>% 
+        cbind(., rep("p", length(.))) %>%
+        `colnames<-`(c("label", "type")) %>%
+        as.data.frame
+# write.table(p_nodes, "p_nodes.txt")
+
+org_lst <- data$ORGANIZATION
+orgs <- unlist(org_lst)
+# freq2 <- sort(table(orgs), decreasing = T)
+# head(freq2, n = 50L)
+org_nodes <- sort(unique(orgs)) %>% 
+        cbind(., rep("o", length(.))) %>%
+        `colnames<-`(c("label", "type")) %>%
+        as.data.frame
+# write.table(org_nodes, "org_nodes.txt")
+# combine the lists of people and orgs
+p_org <- mapply(c, p_lst, org_lst, SIMPLIFY=FALSE)
+
+# create a vector to show the type of nodes (used in visualization)
+nodes <- rbind(p_nodes, org_nodes) %>% 
+        distinct(label, .keep_all = TRUE)
+
+save(p_nodes, org_nodes, nodes, file = "nodes.RData")
+
+# whichi rows are repetitive?
+duplicate_rows <- nodes[which(duplicated(nodes$name)==TRUE),]
+write.table(duplicate_rows, "duplicate_rows.txt")
+```
+
+### 2. Co-occurrence Matrix
+
+```{r}
+## a function for constructing co-occurrence matrix ##
+# argument = a list of people/orgs mentioned in press releases
+adj_mat <-function(lst) {
+        nodes <- sort(unique(unlist(lst))) # extract unique nodes
+        n_nodes <- length(nodes) # number of nodes
+        mat <- matrix(NA, nrow = n_nodes, ncol = n_nodes) # an empty matrix to store values of co-occurrence
+        for (i in 1:n_nodes) {
+                # whether a vector contains i
+                find_i <- lapply(lst, function(x) which(x == nodes[i]))
+                # which vectors contain i
+                position_i <- sapply(find_i, function(x) length(x) > 0)
+                subset <- lst[position_i]
+                # subsetting p.list
+                for (j in 1:n_nodes) {
+                        # find j in p.subset
+                        find_j <- lapply(subset, function(x) which(x == nodes[j]))
+                        position_j <- sapply(find_j, function(x) length(x) > 0)
+                        n_co <- length(which(position_j)) # gives number of co-occurrence
+                        mat[i, j] <- n_co
+                }
+                mat[i, i] <- 0 # diagnal = 0
+        }
+        return(mat)
+}        
+
+# adjacency matrix for people
+system.time(p_mat <- adj_mat(p_lst))
+
+# adjacency matrix for orgs 
+system.time(org_mat <- adj_mat(org_lst))
+
+# adjacency matrix for people and orgs combined
+system.time(p_org_mat <- adj_mat(p_org))
+
+save(p_mat, org_mat, p_org_mat, file = "AdjMat.RData")
+
+```
+
+### 3. Network Visualization
+
+```{r}
+rm(list = ls())
+load("nodes.RData")
+load("AdjMat.RData")
+library(igraph)
+
+# a function for computing node attributes
+node_attr <- function(nodes, graph) {
+        if("type" %in% colnames(nodes)) {
+                nodes <- mutate(nodes, shape = if_else(
+                        nodes$type == "p", "circle", "square",
+                        missing = NULL)
+                        )
+        }                
+        degree <- degree(graph)
+        strength <- strength(graph) # weighted vertex degree
+        btw <- betweenness(graph)
+        closeness <- closeness(graph)
+        eigen <- eigen_centrality(graph)$vector
+        node_attr <- data.frame(nodes, degree, strength, 
+                                btw, closeness, eigen,
+                                stringsAsFactors = FALSE)
+        
+        return(node_attr)
+}
+
+g <- graph_from_adjacency_matrix(
+        p_mat, mode = "undirected", weighted = TRUE)
+# tran <- transitivity(g)
+p_attr <- node_attr(p_nodes, g)       
+for(i in 1:ncol(p_attr)) {
+        g <- set_vertex_attr(g, colnames(p_attr)[i], value = p_attr[,i])
+}
+
+g_combined <- graph_from_adjacency_matrix(p_org_mat, mode = "undirected", weighted = TRUE)
+combined_attr <-node_attr(nodes,g_combined)
+
+plot1 <- 
+        plot.igraph(
+                g, 
+                vertex.size = 0.1*V(g)$degree,
+                vertex.label = V(g)$label,
+                vertex.label.cex = 0.5,
+                vertex.label.dist=1.5,
+                vertex.shape = V(g)$shape
+            )  
+
+
+
+# g2 <- delete.vertices(g, degree(g)<=50)
+# set.seed((seed))
+# plot2 <- plot.igraph(g2, 
+#                   vertex.size = 0.8*sqrt(degree(g2)),
+#                   vertex.label = p_nodes[degree(g)>50],
+#                   vertex.label.cex = 0.5,
+#                   vertex.label.dist=1.5,
+#                   layout=layout_with_fr
+# )                  
+# rescale=F,axes=TRUE,ylim=c(0,6),xlim=c(0,1), asp = 0
+
+
+# graph including both people & orgs
+
+```
+
