@@ -102,7 +102,7 @@ load("nodes.RData")
 load("AdjMat.RData")
 library(igraph)
 
-# a function for computing node attributes
+## a function for computing node attributes ##
 node_attr <- function(nodes, graph) {
         if("type" %in% colnames(nodes)) {
                 nodes <- mutate(nodes, shape = if_else(
